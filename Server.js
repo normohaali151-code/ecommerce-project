@@ -19,9 +19,9 @@ const Order = require("./models/Order");
 // Middleware
 const authMiddleware = require("./middleware/authmiddleware");
 const authorizeRole = require("./middleware/authorizeRole");
+const ImageKit = require("imagekit");
 const multer = require("multer");
-const path = require("path");
-const fs = require("fs");
+
 // HOME ROUTE
 app.get("/", (req, res) => {
   res.send("E-commerce Backend is Running!");
@@ -325,30 +325,16 @@ app.delete(
     }
   }
 );
-// CREATE UPLOADS FOLDER IF NOT EXISTS
-const uploadDir = path.join(__dirname, "uploads");
-
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir);
-}
-
-// MULTER STORAGE
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, uploadDir);
-  },
-
-  filename: (req, file, cb) => {
-    const uniqueName =
-      Date.now() + "-" + file.originalname.replace(/[^a-zA-Z0-9.-]/g, "_");
-
-    cb(null, uniqueName);
-  },
+// 1. KU XIR IMAGEKIT
+const imagekit = new ImageKit({
+  publicKey: process.env.IMAGEKIT_PUBLIC_KEY,
+  privateKey: process.env.IMAGEKIT_PRIVATE_KEY,
+  urlEndpoint: process.env.IMAGEKIT_URL_ENDPOINT,
 });
 
+// 2. MULTER MEMORY STORAGE
 const upload = multer({
-  storage,
-
+  storage: multer.memoryStorage(),
   fileFilter: (req, file, cb) => {
     if (file.mimetype.startsWith("image/")) {
       cb(null, true);
@@ -356,35 +342,38 @@ const upload = multer({
       cb(new Error("Only image files are allowed"));
     }
   },
-
   limits: {
     fileSize: 5 * 1024 * 1024,
   },
 });
 
-// MAKE IMAGES ACCESSIBLE
-app.use("/uploads", express.static(uploadDir));
-
-// IMAGE UPLOAD ROUTE
+// 3. IMAGE UPLOAD ROUTE
 app.post(
   "/upload",
   authMiddleware,
   authorizeRole("admin"),
   upload.single("image"),
-  (req, res) => {
-    if (!req.file) {
-      return res.status(400).json({
-        message: "Please select an image",
+  async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({
+          message: "Please select an image",
+        });
+      }
+
+      const result = await imagekit.upload({
+        file: req.file.buffer,
+        fileName: Date.now() + "-" + req.file.originalname,
+        folder: "/ecommerce-products",
       });
+
+      res.json({
+        message: "Image uploaded successfully",
+        imageUrl: result.url,
+      });
+    } catch (error) {
+      res.status(500).json({ message: "Image upload failed", error: error.message });
     }
-
-    const imageUrl =
-      `${req.protocol}://${req.get("host")}/uploads/${req.file.filename}`;
-
-    res.json({
-      message: "Image uploaded successfully",
-      imageUrl,
-    });
   }
 );
 // GET ALL PRODUCTS
